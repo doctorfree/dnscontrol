@@ -1,0 +1,11 @@
+{
+    "bind" : {
+      "TYPE": "BIND"
+    },
+    "cloudflare" : {
+        "TYPE": "CLOUDFLAREAPI",
+        "accountid": "$CLOUDFLARE_API_USER",
+        "apitoken": "$CLOUDFLARE_API_TOKEN"
+    },
+    "none": { "TYPE": "NONE" }
+}

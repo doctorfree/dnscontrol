@@ -1,0 +1,10 @@
+#!/bin/bash
+
+TAG="$1"
+
+[ "${TAG}" ] || {
+  echo "Usage: revert_to_tag <tag>"
+  exit 1
+}
+
+git reset --hard "${TAG}"

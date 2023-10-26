@@ -1,0 +1,79 @@
+#!/bin/bash
+
+TOP="$( cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
+export PATH="/usr/local/bin:${PATH}"
+
+printf "\n\nCAUTION:"
+printf "\n\tThis script will rollback the dnscontrol repository to the"
+printf "\n\tprevious merge and push the previous merge state to Cloudflare."
+printf "\nOnly run this script if an incorrect merge has been performed.\n"
+while true; do
+  read -r -p "Would you like to rollback to the previous merge? (y/n) " yn
+  case $yn in
+    [Yy]*)
+        printf "\nProceeding\n"
+        break
+        ;;
+    [Nn]*)
+        printf "\nExiting. No changes were made to the git repo or Cloudflare.\n"
+        exit 1
+        ;;
+      *)
+        printf "\nPlease answer yes or no.\n"
+        ;;
+  esac
+done
+
+# Must be performed at top of repo
+cd $(dirname "${TOP}")
+
+have_dnsc=$(type -p dnscontrol)
+[ "${have_dnsc}" ] || {
+  [ -x "${TOP}/install-dnscontrol" ] || {
+    echo "Cannot locate dnscontrol binary"
+    echo "Install dnscontrol on this system to push DNS changes manually"
+    echo "Exiting without reverting"
+    exit 1
+  }
+  ${TOP}/install-dnscontrol
+}
+have_dnsc=$(type -p dnscontrol)
+[ "${have_dnsc}" ] || {
+    echo "Cannot locate dnscontrol binary"
+    echo "Install dnscontrol on this system to push DNS changes manually"
+    echo "Exiting without reverting"
+    exit 1
+}
+
+# Verify credentials are ok
+dnscontrol check-creds cloudflare > /dev/null 2>&1 || {
+  echo "Cloudflare credential check failure"
+  echo "Set the CF_API_TOKEN environment variable to push DNS changes"
+  echo "Exiting without reverting"
+  exit 1
+}
+
+index=$(git log --merges --pretty=format:"%h" HEAD | tr '\n' ' ' | awk '{ print $(NF - 1) }')
+
+git checkout ${index} .
+git commit -a -m "Reverting to previous merge at index=${index}"
+git push origin main
+
+dnscontrol preview
+
+while true; do
+  read -r -p "Would you like to push these changes to Cloudflare? (y/n) " yn
+  case $yn in
+    [Yy]*)
+        dnscontrol push
+        break
+        ;;
+    [Nn]*)
+        printf "\nExiting. Changes were made to the git repo but no changes pushed.\n"
+        exit 1
+        ;;
+      *)
+        printf "\nPlease answer yes or no.\n"
+        ;;
+  esac
+done

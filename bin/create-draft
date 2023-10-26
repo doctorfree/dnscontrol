@@ -1,0 +1,3 @@
+#!/bin/bash
+
+dnscontrol get-zones --format=js --out=draft.js cloudflare - all

@@ -1,0 +1,26 @@
+name: Check
+
+on:
+  push:
+    paths:
+      - "creds.json"
+      - "dnsconfig.js"
+      - ".github/workflows/check.yml"
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install DNSControl
+        run: bin/install-dnscontrol -i
+
+      - name: DNSControl Check Credentials
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: /usr/local/bin/dnscontrol check-creds cloudflare
+
+      - name: DNSControl Check
+        run: /usr/local/bin/dnscontrol check

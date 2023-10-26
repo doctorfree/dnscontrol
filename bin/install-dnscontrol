@@ -1,0 +1,158 @@
+#!/bin/bash
+#
+# install-dnscontrol - install the dnscontrol binary
+#
+# Usage: install-dnscontrol [-i] [-v] [-V version]
+#
+# Written October, 2023 by Ronald Joe Record <ron.record@hornblower.com>
+#
+# Requires curl, jq, and wget unless -i is specified then wget only
+# Use -i in action workflows where apt is not available on the runner
+#
+# Alternate installation approaches:
+#
+# With Go:
+# go install github.com/StackExchange/dnscontrol/v4@latest
+#
+# With Docker:
+# sudo docker run --rm -it -v "$(pwd):/dns"  ghcr.io/stackexchange/dnscontrol preview
+#
+# Download release binary - installs latest release of dnscontrol in /usr/local/bin
+OWNER=StackExchange
+PROJECT=dnscontrol
+API_URL="https://api.github.com/repos/${OWNER}/${PROJECT}/releases/latest"
+SRV_URL="https://github.com/${OWNER}/${PROJECT}/releases/download"
+
+# Update this to latest version (run install-dnscontrol -v)
+VER="4.6.0"
+
+usage() {
+  printf "\nUsage: install-dnscontrol [-i] [-v] [-V version] [-u]"
+  printf "\nWhere:"
+  printf "\n\t-i indicates only use wget to download the specified version"
+  printf "\n\t-v indicates display latest version download url and exit"
+  printf "\n\t-V version specifies a version number to download"
+  printf "\n\t-u displays this usage message and exits\n"
+  printf "\n'install-dnscontrol -i' is useful in workflows where curl/jq are not available"
+  printf "\nHowever, -i downloads a fixed version set in this file (${VER})"
+  printf "\nUse '-V <version>' in conjunction with -i to specify a later version\n"
+  printf "\nWithout arguments install-dnscontrol downloads and installs the latest binary"
+  exit 1
+}
+
+fixver=
+showver=
+while getopts ":ivV:u" flag; do
+  case $flag in
+    i)
+      fixver=1
+      ;;
+    v)
+      showver=1
+      ;;
+    V)
+      VER="$OPTARG"
+      ;;
+    u)
+      usage
+      ;;
+    \?)
+      echo "Invalid option: $flag"
+      usage
+      ;;
+  esac
+done
+shift $(( OPTIND - 1 ))
+
+os="linux_amd64"
+pkgmgr="apt"
+pkgsudo="sudo"
+pkgargs="-q -y"
+platform=$(uname -s)
+[ "${platform}" == "Darwin" ] && {
+  os="darwin_all"
+  pkgmgr="brew"
+  pkgsudo=
+  pkgargs="--quiet"
+}
+[ "${fixver}" ] && {
+  DL_URL="${SRV_URL}/v${VER}/dnscontrol_${VER}_${os}.tar.gz"
+}
+
+if [[ $EUID -eq 0 ]]
+then
+  SUDO=
+  pkgsudo=
+else
+  SUDO=sudo
+fi
+
+[ "${DL_URL}" ] || {
+  have_apt=$(type -p apt)
+  have_brew=$(type -p brew)
+  have_curl=$(type -p curl)
+  have_jq=$(type -p jq)
+  have_wget=$(type -p wget)
+  [ "${have_apt}" ] || [ "${have_brew}" ] && {
+    [ "${have_curl}" ] || ${pkgsudo} ${pkgmgr} install ${pkgargs} curl > /dev/null 2>&1
+    [ "${have_jq}" ] || ${pkgsudo} ${pkgmgr} install ${pkgargs} jq > /dev/null 2>&1
+    [ "${have_wget}" ] || ${pkgsudo} ${pkgmgr} install ${pkgargs} wget > /dev/null 2>&1
+  }
+
+  name="dnscontrol"
+  format="tar"
+  suffix="gz"
+  DL_URL=$(curl --silent "${API_URL}" \
+    | jq --raw-output '.assets | .[]?.browser_download_url' \
+    | grep "${os}\.${format}\.${suffix}$")
+  VER=$(echo "${DL_URL}" | awk -F '/' '{ print $8 }' | sed -e "s/v//")
+}
+
+[ "${DL_URL}" ] || {
+  DL_URL="${SRV_URL}/v${VER}/dnscontrol_${VER}_${os}.tar.gz"
+}
+
+if [ "${DL_URL}" ]
+then
+  [ "${showver}" ] && {
+    printf "\n${DL_URL}\n"
+    exit 0
+  }
+  # Check if installed version is same as download version
+  [ -x /usr/local/bin/dnscontrol ] && {
+    DVER=$(/usr/local/bin/dnscontrol version | awk '{ print $2 }')
+    IVER=$(echo ${DVER} | sed -e "s/\"//g")
+    [ "${VER}" == "${IVER}" ] && {
+      printf "\nDNSControl version ${VER} already installed\n"
+      exit 0
+    }
+  }
+  printf "\nDownloading dnscontrol release asset"
+  TEMP_ASS="$(mktemp --suffix=.tgz)"
+  wget --quiet -O "${TEMP_ASS}" "${DL_URL}" >/dev/null 2>&1
+  chmod 644 "${TEMP_ASS}"
+  mkdir -p /tmp/dnsc$$
+  tar -C /tmp/dnsc$$ -xzf "${TEMP_ASS}"
+  [ -f /tmp/dnsc$$/dnscontrol ] && {
+    chmod 755 /tmp/dnsc$$/dnscontrol
+    /tmp/dnsc$$/dnscontrol version > /dev/null 2>&1 && {
+      [ -d /usr/local/bin ] || ${SUDO} mkdir -p /usr/local/bin
+      [ -f /usr/local/bin/dnscontrol ] && {
+        printf "\nMoving existing /usr/local/bin/dnscontrol:"
+        printf "\n\t/usr/local/bin/dnscontrol -> /usr/local/bin/dnscontrol-$$"
+        ${SUDO} mv /usr/local/bin/dnscontrol /usr/local/bin/dnscontrol-$$
+      }
+      ${SUDO} mv /tmp/dnsc$$/dnscontrol /usr/local/bin/dnscontrol
+      ${SUDO} chmod 755 /usr/local/bin/dnscontrol
+      ${SUDO} chown root:root /usr/local/bin/dnscontrol
+    }
+  }
+  rm -f "${TEMP_ASS}"
+  rm -rf /tmp/dnsc$$
+  printf "\nDNSControl release binary installed as /usr/local/bin/dnscontrol\n"
+  /usr/local/bin/dnscontrol version
+else
+  printf "\n\nERROR: unable to locate release binary distribution archive"
+  printf "\n\nExiting without installing\n\n"
+  exit 1
+fi
